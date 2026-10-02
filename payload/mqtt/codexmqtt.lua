@@ -197,7 +197,10 @@ local function recvBytes(sock, n)
   if err == "timeout" then
     return nil, "timeout"
   end
-  return partial, err
+  if partial and #partial > 0 then
+    return partial, err
+  end
+  return nil, err or "connection closed"
 end
 
 local function recvPacket(sock)
