@@ -20,7 +20,11 @@ class HarmonyActivity(CoordinatorEntity, SelectEntity):
         self._attr_device_info = device_info(entry, coordinator.api)
 
     def activities(self):
-        return {f"{a['name']} ({a['id']})": a["id"] for a in self.coordinator.data["config"].get("activities", [])}
+        return {
+            f"{a['name']} ({a['id']})": a["id"]
+            for a in self.coordinator.data.get("native_activities", [])
+            if isinstance(a, dict) and a.get("name") and a.get("id")
+        }
 
     @property
     def options(self):

@@ -20,6 +20,23 @@ from custom_components.harmony_owner.config_flow import HarmonyOwnerConfigFlow
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_activities_and_run(self):
+        await self.pair()
+
+        activities = await self.api.native_activities()
+        self.assertEqual(
+            [(a["id"], a["name"]) for a in activities],
+            [("53938598", "Watch TV"), ("53938610", "SHIELD TV")],
+        )
+
+        await self.api.activity("53938610")
+        self.assertEqual(self.calls[-2][0], "activities/native/run")
+        self.assertEqual(self.calls[-2][1], {"activityId": "53938610"})
+
+        await self.api.activity("-1")
+        self.assertEqual(self.calls[-2][0], "activities/run")
+        self.assertEqual(self.calls[-2][1], {"activityId": "-1"})
+
     async def test_mqtt_discovery_schemas(self):
         path = os.environ.get("MQTT_DISCOVERY_JSON")
         if not path:
@@ -77,9 +94,17 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             return web.json_response({"deviceCount": 1, "devices": [{"id": "12", "name": "TV", "commands": [{"name": "VolumeUp"}]}]})
         if path == "configuration":
             return web.json_response({"activities": [{"id": "watch", "name": "Watch TV"}]})
+        if path == "activities/native":
+            return web.json_response({
+                "Activities": [
+                    {"id": "53938598", "name": "Watch TV"},
+                    {"id": "53938610", "name": "SHIELD TV"},
+                ]
+            })
+
         if path == "activities/state":
             return web.json_response({"activityId": "", "estimated": True})
-        if path in ("commands/send", "activities/run"):
+        if path in ("commands/send", "activities/run", "activities/native/run"):
             self.sent += 1
             return web.json_response({"id": "operation-1", "state": "queued"}, status=202)
         if path == "operations":

@@ -884,6 +884,41 @@ static void local_wifi(int fd, const struct request *r, const cJSON *body) {
 done:
     if (lock >= 0) close(lock); cJSON_Delete(reply);
 }
+static cJSON *local_native_activity_state(void) {
+    char hub_id[64], escaped[128], cmd[384], result[4096];
+    cJSON *reply, *data, *out;
+    int rc;
+
+    if (!load_hub_id(hub_id, sizeof(hub_id))) return NULL;
+
+    shell_escape_single(hub_id, escaped, sizeof(escaped));
+    snprintf(cmd, sizeof(cmd),
+        "/data/codex/bin/codex_hbus '%s' harmony.engine?getCurrentActivity 2>&1",
+        escaped);
+
+    rc = run_cmd(cmd, result, sizeof(result));
+    if (rc != 0 || !result[0]) return NULL;
+
+    reply = lj_parse(result);
+    if (!cJSON_IsObject(reply) || lj_int(reply, "code", -1) != 200) {
+        cJSON_Delete(reply);
+        return NULL;
+    }
+
+    data = lj_get(reply, "data");
+    if (!cJSON_IsObject(data) || !lj_str(data, "result")[0]) {
+        cJSON_Delete(reply);
+        return NULL;
+    }
+
+    out = cJSON_CreateObject();
+    cJSON_AddStringToObject(out, "activityId", lj_str(data, "result"));
+    cJSON_AddBoolToObject(out, "estimated", 0);
+
+    cJSON_Delete(reply);
+    return out;
+}
+
 static void local_native_activity_run(int fd, const cJSON *body) {
     cJSON *activities = lj_read(ACTIVITY_LIST, 262144);
     cJSON *array = NULL;
@@ -913,20 +948,33 @@ static void local_native_activity_run(int fd, const cJSON *body) {
         goto done;
     }
 
-    cJSON_ArrayForEach(item, array) {
-        if (cJSON_IsObject(item) && !strcmp(lj_str(item, "id"), activity_id)) {
-            break;
+    {
+        char *end = NULL;
+        long activity_number = strtol(activity_id, &end, 10);
+        if (!*activity_id || !end || *end || activity_number < 0) {
+            local_error(fd, "400 Bad Request", "Invalid native activity ID.");
+            goto done;
+        }
+
+        cJSON_ArrayForEach(item, array) {
+            if (cJSON_IsObject(item) &&
+                lj_int(item, "Id-", -1) == activity_number) {
+                break;
+            }
+        }
+
+        if (!item || !cJSON_IsObject(item) ||
+            lj_int(item, "Id-", -1) != activity_number) {
+            local_error(fd, "404 Not Found", "Native activity not found.");
+            goto done;
         }
     }
 
-    if (!item || !cJSON_IsObject(item) ||
-        strcmp(lj_str(item, "id"), activity_id)) {
-        local_error(fd, "404 Not Found", "Native activity not found.");
+    if (read_text("/data/codex/hub_id", hub_id, sizeof(hub_id)) <= 0) {
+        local_error(fd, "503 Service Unavailable", "Harmony Hub ID is unavailable.");
         goto done;
     }
-
-    if (read_text("/data/codex/hub_id", hub_id, sizeof(hub_id)) <= 0 ||
-        !safe_run_id(hub_id)) {
+    if (!safe_run_id(hub_id)) {
         local_error(fd, "503 Service Unavailable", "Harmony Hub ID is unavailable.");
         goto done;
     }
@@ -979,7 +1027,7 @@ static int local_dispatch(int fd, const struct request *r) {
     if (!strcmp(r->path, "/api/v1/configuration") && get) {
         out = local_config(); lj_reply(fd, "200 OK", out); cJSON_Delete(out);
     } else if (!strcmp(r->path, "/api/v1/activities/state") && get) {
-        out = lj_read(LOCAL_OPS "/activity-state.json", 4096);
+        out = local_native_activity_state();
         if (!out) out = lj_parse("{\"activityId\":\"\",\"estimated\":true}");
         lj_reply(fd, "200 OK", out); cJSON_Delete(out);
     } else if (!strcmp(r->path, "/api/v1/devices") && get) render_inventory_json(fd);

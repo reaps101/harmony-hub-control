@@ -22,7 +22,9 @@ class HarmonyCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         try:
-            return await self.api.snapshot()
+            data = await self.api.snapshot()
+            data["native_activities"] = await self.api.native_activities()
+            return data
         except PairingRequired as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except HomeAssistantError as err:
