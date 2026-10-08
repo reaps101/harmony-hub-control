@@ -884,6 +884,80 @@ static void local_wifi(int fd, const struct request *r, const cJSON *body) {
 done:
     if (lock >= 0) close(lock); cJSON_Delete(reply);
 }
+static void local_native_activity_run(int fd, const cJSON *body) {
+    cJSON *activities = lj_read(ACTIVITY_LIST, 262144);
+    cJSON *array = NULL;
+    cJSON *item = NULL;
+    const char *activity_id = lj_str(body, "activityId");
+    char hub_id[96], cmd[512], result[4096];
+    int rc;
+
+    if (!safe_run_id(activity_id) || strlen(activity_id) > 64) {
+        local_error(fd, "400 Bad Request", "Invalid native activity ID.");
+        goto done;
+    }
+
+    if (!activities) {
+        local_error(fd, "503 Service Unavailable", "Native activity list is unavailable.");
+        goto done;
+    }
+
+    if (cJSON_IsArray(activities)) {
+        array = activities;
+    } else {
+        array = lj_get(activities, "Activities");
+    }
+
+    if (!cJSON_IsArray(array)) {
+        local_error(fd, "503 Service Unavailable", "Native activity list has an invalid format.");
+        goto done;
+    }
+
+    cJSON_ArrayForEach(item, array) {
+        if (cJSON_IsObject(item) && !strcmp(lj_str(item, "id"), activity_id)) {
+            break;
+        }
+    }
+
+    if (!item || !cJSON_IsObject(item) ||
+        strcmp(lj_str(item, "id"), activity_id)) {
+        local_error(fd, "404 Not Found", "Native activity not found.");
+        goto done;
+    }
+
+    if (read_text("/data/codex/hub_id", hub_id, sizeof(hub_id)) <= 0 ||
+        !safe_run_id(hub_id)) {
+        local_error(fd, "503 Service Unavailable", "Harmony Hub ID is unavailable.");
+        goto done;
+    }
+
+    snprintf(cmd, sizeof(cmd),
+        "/data/codex/bin/codex_hbus '%s' harmony.engine?startactivity "
+        "'{\"activityId\":\"%s\"}' 2>&1",
+        hub_id, activity_id);
+
+    rc = run_cmd(cmd, result, sizeof(result));
+    if (rc != 0 || !result[0]) {
+        local_error(fd, "502 Bad Gateway", "Native activity engine did not respond.");
+        goto done;
+    }
+
+    {
+        cJSON *reply = lj_parse(result);
+
+        if (!reply || !cJSON_IsObject(reply)) {
+            cJSON_Delete(reply);
+            local_error(fd, "502 Bad Gateway", "Native activity engine returned invalid JSON.");
+            goto done;
+        }
+
+        lj_reply(fd, "200 OK", reply);
+        cJSON_Delete(reply);
+    }
+
+done:
+    cJSON_Delete(activities);
+}
 static int local_dispatch(int fd, const struct request *r) {
     struct local_controller ctl; cJSON *body = NULL, *out; int owner = 0, get = !strcmp(r->method, "GET");
     if (local_asset(fd, r)) return 1;
@@ -897,9 +971,9 @@ static int local_dispatch(int fd, const struct request *r) {
     }
     owner = !(strncmp(r->path, "/api/v1/operations", 18) == 0 ||
         !strcmp(r->path, "/api/v1/commands/send") ||
-        !strcmp(r->path, "/api/v1/activities/run") ||
+        !strcmp(r->path, "/api/v1/activities/run") || !strcmp(r->path, "/api/v1/activities/native/run") ||
         (get && !strcmp(r->path, "/api/v1/activities/state")) ||
-        (get && (!strcmp(r->path, "/api/v1/devices") || !strcmp(r->path, "/api/v1/bluetooth/devices") || !strcmp(r->path, "/api/v1/configuration"))));
+        (get && (!strcmp(r->path, "/api/v1/devices") || !strcmp(r->path, "/api/v1/bluetooth/devices") || !strcmp(r->path, "/api/v1/configuration") || !strcmp(r->path, "/api/v1/activities/native"))));
     if (!local_auth(fd, r, &ctl, owner)) return 1;
     if (!get) { body = lj_parse(r->body); if (!cJSON_IsObject(body)) { local_error(fd, "400 Bad Request", "Expected a valid JSON object without duplicate fields."); cJSON_Delete(body); return 1; } }
     if (!strcmp(r->path, "/api/v1/configuration") && get) {
@@ -913,6 +987,7 @@ static int local_dispatch(int fd, const struct request *r) {
     else if (!strcmp(r->path, "/api/v1/controllers")) local_controllers(fd, r, &ctl, body);
     else if (!strncmp(r->path, "/api/v1/operations", 18)) local_operations(fd, r, body, &ctl);
     else if (!strcmp(r->path, "/api/v1/activities/run") && !get) local_activity_run(fd, body, &ctl);
+    else if (!strcmp(r->path, "/api/v1/activities/native/run") && !get) local_native_activity_run(fd, body);
     else if (!strcmp(r->path, "/api/v1/commands/send") && !get) {
         const char *kind = !strcmp(lj_str(body, "transport"), "bluetooth") ? "bluetooth" : !strcmp(lj_str(body, "mode"), "hold") ? "hold" : "tap";
         int lock = local_lock();

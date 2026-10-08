@@ -79,6 +79,13 @@ class HarmonyOwnerApi:
                 "config": await self.request("configuration"),
                 "activity": await self.request("activities/state")}
 
+    async def native_activities(self) -> list[dict]:
+        result = await self.request("activities/native")
+        activities = result.get("Activities", [])
+        if not isinstance(activities, list):
+            raise CannotConnect("Hub returned an invalid native activity list")
+        return activities
+
     async def wait_operation(self, operation: dict, timeout: float = 30) -> dict:
         op_id = operation.get("id", "")
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,96}", op_id):
@@ -130,5 +137,8 @@ class HarmonyOwnerApi:
 
     async def activity(self, activity_id: str) -> None:
         async with self.lock:
-            operation = await self.request("activities/run", {"activityId": activity_id})
-            await self.wait_operation(operation, 180)
+            if activity_id == "-1":
+                operation = await self.request("activities/run", {"activityId": activity_id})
+                await self.wait_operation(operation, 180)
+            else:
+                await self.request("activities/native/run", {"activityId": activity_id})
