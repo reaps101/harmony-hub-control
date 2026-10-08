@@ -65,3 +65,7 @@ if [ -x /data/codex/maintenance.sh ]; then
 fi
 
 echo "$(date) codex init done" >> "$LOG"
+
+if [ -x /data/codex/button_bridge.sh ] && ! ps | grep "[b]utton_bridge.sh" >/dev/null 2>&1; then
+  /data/codex/button_bridge.sh &
+fi

@@ -333,7 +333,7 @@ class Installer:
             files["/data/codex/bin/" + name] = ((PAYLOAD / "bin" / name).read_bytes(), "755")
         # A known-good recovery binary is not replaced by browser release activation.
         files["/cache/harmony-recovery"] = (binary.read_bytes(), "755")
-        for name in ("init.sh", "maintenance.sh", "recovery_ap.sh", "release_recovery.sh"):
+        for name in ("init.sh", "maintenance.sh", "recovery_ap.sh", "release_recovery.sh", "button_bridge.sh"):
             files["/data/codex/" + name] = ((PAYLOAD / "scripts" / name).read_bytes(), "755")
         for name in ("dropbear", "dropbearkey"):
             raw = (PAYLOAD / "scripts" / name).read_bytes()
